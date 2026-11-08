@@ -1,0 +1,1321 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Winter Global Clicker</title>
+    
+    <!-- Telegram WebApp SDK -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    
+    <!-- Firebase SDK (Modules) -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getDatabase, ref, onValue, set, runTransaction } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+        
+        // ==========================================
+        // НАСТРОЙКИ FIREBASE (ВСТАВЬ СВОИ КЛЮЧИ ЗДЕСЬ)
+        // ==========================================
+        const firebaseConfig = {
+            apiKey: "ТВОЙ_API_KEY",
+            authDomain: "ТВОЙ_PROJECT_ID.firebaseapp.com",
+            databaseURL: "https://ТВОЙ_PROJECT_ID-default-rtdb.firebaseio.com",
+            projectId: "ТВОЙ_PROJECT_ID",
+            storageBucket: "ТВОЙ_PROJECT_ID.appspot.com",
+            messagingSenderId: "ТВОЙ_SENDER_ID",
+            appId: "ТВОЙ_APP_ID"
+        };
+
+        let app, db;
+        let isFirebaseActive = false;
+
+        try {
+            // Проверка, вставлены ли ключи
+            if (firebaseConfig.apiKey !== "ТВОЙ_API_KEY" && firebaseConfig.apiKey !== "") {
+                app = initializeApp(firebaseConfig);
+                db = getDatabase(app);
+                isFirebaseActive = true;
+                console.log("Firebase успешно инициализирован.");
+            } else {
+                console.warn("Firebase ключи не вставлены. Игра работает в локальном режиме.");
+            }
+        } catch (e) {
+            console.error("Ошибка инициализации Firebase:", e);
+        }
+
+        // Передаем методы в глобальную область для использования в основном скрипте
+        window.gameDB = { db, ref, onValue, set, runTransaction, isFirebaseActive };
+        
+        // Сообщаем основному скрипту, что модули загружены
+        window.dispatchEvent(new Event('firebaseReady'));
+    </script>
+
+    <style>
+        /* ==========================================
+           ИМПОРТ ШРИФТОВ
+           ========================================== */
+        @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;800;900&family=Inter:wght@400;600;800&display=swap');
+
+        /* ==========================================
+           CSS ПЕРЕМЕННЫЕ И СБРОС
+           ========================================== */
+        :root {
+            --bg-gradient: linear-gradient(135deg, #0a192f 0%, #112240 50%, #233554 100%);
+            --glass-bg: rgba(255, 255, 255, 0.05);
+            --glass-border: rgba(255, 255, 255, 0.1);
+            --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+            --primary-cyan: #64ffda;
+            --primary-blue: #4a90e2;
+            --danger-red: #ff4b2b;
+            --danger-gradient: linear-gradient(90deg, #ff416c, #ff4b2b);
+            --text-main: #e6f1ff;
+            --text-dim: #8892b0;
+            --font-main: 'Montserrat', sans-serif;
+            --font-alt: 'Inter', sans-serif;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: var(--font-main);
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        html, body {
+            width: 100%;
+            height: 100dvh; /* Динамическая высота для мобильных */
+            overflow: hidden;
+            background: var(--bg-gradient);
+            color: var(--text-main);
+            position: relative;
+            touch-action: pan-x pan-y; /* Предотвращает зум */
+        }
+
+        /* Безопасные зоны для iOS (Telegram) */
+        body {
+            padding-top: env(safe-area-inset-top);
+            padding-bottom: env(safe-area-inset-bottom);
+        }
+
+        /* ==========================================
+           КРАСИВЫЙ ЗИМНИЙ ФОН И АНИМАЦИИ
+           ========================================== */
+        
+        /* Слой снега */
+        #snow-layer {
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            z-index: 1;
+            overflow: hidden;
+        }
+
+        .snowflake {
+            position: absolute;
+            top: -20px;
+            background: white;
+            border-radius: 50%;
+            opacity: 0.8;
+            filter: blur(1px);
+            animation: snow-fall linear infinite;
+            box-shadow: 0 0 5px rgba(255, 255, 255, 0.5);
+        }
+
+        @keyframes snow-fall {
+            0% { transform: translateY(-10vh) translateX(0) rotate(0deg); }
+            100% { transform: translateY(110vh) translateX(50px) rotate(360deg); }
+        }
+
+        /* Светящиеся пятна на фоне (Аура) */
+        .aura {
+            position: fixed;
+            border-radius: 50%;
+            filter: blur(80px);
+            z-index: 0;
+            opacity: 0.4;
+            animation: pulse-aura 10s infinite alternate;
+        }
+        .aura-1 { top: -10%; left: -10%; width: 50vw; height: 50vw; background: #4a90e2; }
+        .aura-2 { bottom: -10%; right: -10%; width: 60vw; height: 60vw; background: #64ffda; animation-delay: -5s; }
+
+        @keyframes pulse-aura {
+            0% { transform: scale(1) translate(0, 0); opacity: 0.3; }
+            100% { transform: scale(1.2) translate(20px, 20px); opacity: 0.5; }
+        }
+
+        /* ==========================================
+           ЭКРАН ЗАГРУЗКИ
+           ========================================== */
+        #loading-screen {
+            position: fixed;
+            inset: 0;
+            background: #0a192f;
+            z-index: 99999;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            transition: opacity 0.6s cubic-bezier(0.4, 0, 0.2, 1), visibility 0.6s;
+        }
+
+        #loading-screen.hidden {
+            opacity: 0;
+            visibility: hidden;
+        }
+
+        .loader-container {
+            position: relative;
+            width: 100px;
+            height: 100px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .loader-ring {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            border: 4px solid transparent;
+            border-top-color: var(--primary-cyan);
+            border-bottom-color: var(--primary-blue);
+            border-radius: 50%;
+            animation: spin 1.5s cubic-bezier(0.68, -0.55, 0.265, 1.55) infinite;
+        }
+
+        .loader-ring:nth-child(2) {
+            width: 70%;
+            height: 70%;
+            border-top-color: var(--primary-blue);
+            border-bottom-color: var(--primary-cyan);
+            animation: spin-reverse 1.2s linear infinite;
+        }
+
+        .loader-icon {
+            font-size: 30px;
+            animation: pulse 1s infinite alternate;
+            filter: drop-shadow(0 0 10px var(--primary-cyan));
+        }
+
+        .loading-text {
+            margin-top: 30px;
+            font-size: 20px;
+            font-weight: 800;
+            letter-spacing: 2px;
+            color: var(--primary-cyan);
+            text-shadow: 0 0 10px rgba(100, 255, 218, 0.5);
+            animation: text-glow 2s infinite alternate;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes spin-reverse { to { transform: rotate(-360deg); } }
+        @keyframes pulse { 0% { transform: scale(0.9); } 100% { transform: scale(1.1); } }
+        @keyframes text-glow { 0% { opacity: 0.7; } 100% { opacity: 1; text-shadow: 0 0 20px var(--primary-cyan); } }
+
+        /* ==========================================
+           ИНТЕРФЕЙС ПРИЛОЖЕНИЯ
+           ========================================== */
+        #app-container {
+            position: relative;
+            z-index: 10;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* ВЕРХНЯЯ ПАНЕЛЬ (МЕНЮ) */
+        .top-bar {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 100;
+        }
+
+        .menu-btn {
+            width: 50px;
+            height: 50px;
+            background: var(--glass-bg);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 1px solid var(--glass-border);
+            border-radius: 15px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            gap: 5px;
+            cursor: pointer;
+            box-shadow: var(--glass-shadow);
+            transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+
+        .menu-btn:active { transform: scale(0.85); }
+
+        .menu-line {
+            width: 25px;
+            height: 3px;
+            background-color: var(--text-main);
+            border-radius: 3px;
+            transition: all 0.3s;
+        }
+
+        .menu-btn:hover .menu-line:nth-child(1) { width: 15px; transform: translateX(-5px); }
+        .menu-btn:hover .menu-line:nth-child(3) { width: 15px; transform: translateX(5px); }
+
+        /* БОКОВОЕ МЕНЮ */
+        #sidebar {
+            position: absolute;
+            top: 0;
+            left: -320px;
+            width: 300px;
+            height: 100%;
+            background: rgba(10, 25, 47, 0.85);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-right: 1px solid var(--glass-border);
+            box-shadow: 10px 0 30px rgba(0,0,0,0.5);
+            z-index: 99;
+            padding: 80px 20px 20px;
+            transition: left 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        #sidebar.open { left: 0; }
+
+        .nav-item {
+            padding: 18px 20px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid transparent;
+            border-radius: 15px;
+            font-size: 18px;
+            font-weight: 800;
+            color: var(--text-dim);
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .nav-item:hover, .nav-item.active {
+            background: rgba(100, 255, 218, 0.1);
+            border-color: rgba(100, 255, 218, 0.3);
+            color: var(--primary-cyan);
+            transform: translateX(10px);
+            box-shadow: 0 4px 15px rgba(100, 255, 218, 0.1);
+        }
+
+        .nav-icon {
+            width: 24px;
+            height: 24px;
+            fill: currentColor;
+        }
+
+        /* ОВЕРЛЕЙ ДЛЯ ЗАКРЫТИЯ МЕНЮ */
+        #sidebar-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.5);
+            backdrop-filter: blur(2px);
+            z-index: 98;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s;
+        }
+        #sidebar-overlay.active { opacity: 1; pointer-events: all; }
+
+        /* ==========================================
+           ЭКРАНЫ
+           ========================================== */
+        .screen {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 80px 20px 20px;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.4s, transform 0.4s;
+            transform: translateY(20px);
+        }
+
+        .screen.active {
+            opacity: 1;
+            pointer-events: all;
+            transform: translateY(0);
+        }
+
+        /* ==========================================
+           ЭКРАН КЛИКЕРА
+           ========================================== */
+        #screen-clicker {
+            justify-content: center;
+            padding-top: 100px; /* Отступ для HP бара */
+        }
+
+        /* Полоса здоровья */
+        .hp-container {
+            position: absolute;
+            top: 20px;
+            width: 90%;
+            max-width: 450px;
+            background: rgba(0, 0, 0, 0.4);
+            border-radius: 20px;
+            border: 1px solid var(--glass-border);
+            box-shadow: var(--glass-shadow);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .hp-bar-wrap {
+            height: 35px;
+            width: 100%;
+            position: relative;
+        }
+
+        .hp-fill {
+            height: 100%;
+            width: 100%;
+            background: var(--danger-gradient);
+            border-radius: 20px;
+            transition: width 0.15s ease-out;
+            position: relative;
+        }
+
+        /* Блик на полоске HP */
+        .hp-fill::after {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: linear-gradient(rgba(255,255,255,0.4) 0%, transparent 50%);
+            border-radius: 20px;
+        }
+
+        .hp-text {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 15px;
+            font-weight: 900;
+            letter-spacing: 1px;
+            text-shadow: 1px 1px 3px rgba(0,0,0,0.8);
+            z-index: 2;
+        }
+
+        /* Персонаж */
+        .char-area {
+            width: 100%;
+            height: 60vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            position: relative;
+            transition: transform 0.1s;
+        }
+
+        .char-area:active {
+            transform: scale(0.96);
+        }
+
+        .char-img {
+            max-width: 90%;
+            max-height: 100%;
+            object-fit: contain;
+            filter: drop-shadow(0 20px 30px rgba(0,0,0,0.8)) drop-shadow(0 0 10px rgba(100, 255, 218, 0.3));
+            animation: char-float 4s ease-in-out infinite;
+            transition: filter 0.5s, opacity 0.5s;
+            will-change: transform;
+        }
+
+        @keyframes char-float {
+            0%, 100% { transform: translateY(0) rotate(0deg); }
+            50% { transform: translateY(-15px) rotate(2deg); }
+        }
+
+        /* Эффект мертвого персонажа */
+        .char-area.dead .char-img {
+            filter: grayscale(100%) opacity(0.3) blur(2px);
+            animation: none;
+        }
+
+        /* Всплывающий текст урона */
+        .dmg-text {
+            position: fixed;
+            color: #fff;
+            font-weight: 900;
+            font-size: 24px;
+            pointer-events: none;
+            z-index: 9999;
+            text-shadow: 0 0 10px #ff4b2b, 2px 2px 0 #000;
+            animation: dmg-float 1s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+            will-change: transform, opacity;
+        }
+
+        .dmg-text.crit {
+            font-size: 36px;
+            color: #ffd700;
+            text-shadow: 0 0 20px #ffd700, 3px 3px 0 #000;
+        }
+
+        @keyframes dmg-float {
+            0% { transform: translate(-50%, -50%) scale(0.5); opacity: 1; }
+            50% { transform: translate(-50%, -100px) scale(1.2) rotate(-10deg); opacity: 1; }
+            100% { transform: translate(-50%, -150px) scale(1) rotate(10deg); opacity: 0; }
+        }
+
+        /* Тряска экрана при крите */
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); }
+            20%, 40%, 60%, 80% { transform: translateX(5px); }
+        }
+        .shake-effect { animation: shake 0.4s cubic-bezier(.36,.07,.19,.97) both; }
+
+        /* Сообщение "Мертв" */
+        .dead-alert {
+            position: fixed;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.85);
+            border: 2px solid var(--danger-red);
+            padding: 15px 30px;
+            border-radius: 15px;
+            font-size: 20px;
+            font-weight: 900;
+            color: var(--danger-red);
+            box-shadow: 0 0 20px rgba(255, 75, 43, 0.5);
+            pointer-events: none;
+            z-index: 9999;
+            animation: pop-up 0.3s ease-out forwards;
+        }
+
+        @keyframes pop-up {
+            0% { transform: translate(-50%, -50%) scale(0.5); opacity: 0; }
+            100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+        }
+
+        /* ==========================================
+           ЭКРАН ПРОФИЛЯ
+           ========================================== */
+        #screen-profile {
+            justify-content: flex-start;
+            padding-top: 100px;
+        }
+
+        .profile-card {
+            background: var(--glass-bg);
+            backdrop-filter: blur(15px);
+            -webkit-backdrop-filter: blur(15px);
+            border: 1px solid var(--glass-border);
+            border-radius: 25px;
+            padding: 30px 20px;
+            width: 100%;
+            max-width: 400px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            box-shadow: var(--glass-shadow);
+            position: relative;
+            overflow: hidden;
+        }
+
+        /* Декоративный блик на карточке */
+        .profile-card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: -100%;
+            width: 50%; height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
+            transform: skewX(-20deg);
+            animation: shine 5s infinite;
+        }
+
+        @keyframes shine {
+            0% { left: -100%; }
+            20% { left: 200%; }
+            100% { left: 200%; }
+        }
+
+        .avatar-container {
+            width: 120px;
+            height: 120px;
+            border-radius: 50%;
+            background: #112240;
+            border: 3px solid var(--primary-cyan);
+            box-shadow: 0 0 20px rgba(100, 255, 218, 0.4);
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+            position: relative;
+            z-index: 2;
+        }
+
+        .avatar-container img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .avatar-container svg {
+            width: 60%;
+            height: 60%;
+            fill: var(--text-dim);
+        }
+
+        .user-name {
+            font-size: 24px;
+            font-weight: 900;
+            color: var(--text-main);
+            margin-bottom: 30px;
+            text-shadow: 0 2px 10px rgba(0,0,0,0.5);
+            z-index: 2;
+        }
+
+        .castle-btn {
+            width: 100%;
+            padding: 18px;
+            background: rgba(100, 255, 218, 0.1);
+            border: 1px solid rgba(100, 255, 218, 0.3);
+            border-radius: 15px;
+            color: var(--primary-cyan);
+            font-size: 18px;
+            font-weight: 800;
+            cursor: pointer;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
+            transition: all 0.3s;
+            z-index: 2;
+        }
+
+        .castle-btn:active {
+            transform: scale(0.95);
+            background: rgba(100, 255, 218, 0.2);
+        }
+
+        /* ==========================================
+           МОДАЛЬНЫЕ ОКНА
+           ========================================== */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(10, 25, 47, 0.8);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            z-index: 10000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s;
+        }
+
+        .modal-overlay.active {
+            opacity: 1;
+            pointer-events: all;
+        }
+
+        .modal-content {
+            background: linear-gradient(135deg, rgba(17, 34, 64, 0.95), rgba(10, 25, 47, 0.95));
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            padding: 25px;
+            width: 90%;
+            max-width: 400px;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+            transform: translateY(20px) scale(0.95);
+            transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .modal-overlay.active .modal-content {
+            transform: translateY(0) scale(1);
+        }
+
+        .modal-title {
+            font-size: 22px;
+            font-weight: 900;
+            text-align: center;
+            color: var(--text-main);
+            margin-bottom: 10px;
+            text-shadow: 0 0 10px rgba(100, 255, 218, 0.3);
+        }
+
+        .input-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .input-group label {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-dim);
+        }
+
+        .modal-input {
+            width: 100%;
+            padding: 15px;
+            background: rgba(0,0,0,0.3);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 12px;
+            color: white;
+            font-size: 16px;
+            font-family: var(--font-main);
+            outline: none;
+            transition: border 0.3s, box-shadow 0.3s;
+        }
+
+        .modal-input:focus {
+            border-color: var(--primary-cyan);
+            box-shadow: 0 0 10px rgba(100, 255, 218, 0.2);
+        }
+
+        .btn-primary {
+            width: 100%;
+            padding: 15px;
+            background: var(--primary-blue);
+            border: none;
+            border-radius: 12px;
+            color: white;
+            font-size: 18px;
+            font-weight: 800;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin-top: 10px;
+        }
+
+        .btn-primary:active { transform: scale(0.95); background: #3a7bc8; }
+
+        .btn-close {
+            width: 100%;
+            padding: 15px;
+            background: transparent;
+            border: 1px solid var(--glass-border);
+            border-radius: 12px;
+            color: var(--text-dim);
+            font-size: 16px;
+            font-weight: 800;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-close:active { transform: scale(0.95); background: rgba(255,255,255,0.05); }
+
+        /* Сетка картинок в админке */
+        .image-selector {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+
+        .image-option {
+            background: rgba(0,0,0,0.3);
+            border: 2px solid transparent;
+            border-radius: 12px;
+            height: 80px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            transition: all 0.3s;
+            padding: 5px;
+            overflow: hidden;
+        }
+
+        .image-option img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+            filter: drop-shadow(0 4px 6px rgba(0,0,0,0.5));
+        }
+
+        .image-option:hover {
+            background: rgba(255,255,255,0.05);
+        }
+
+        .image-option.selected {
+            border-color: var(--primary-cyan);
+            background: rgba(100, 255, 218, 0.1);
+            box-shadow: 0 0 15px rgba(100, 255, 218, 0.3);
+        }
+
+        /* Утилиты */
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+
+    <!-- ФОНОВЫЕ ЭЛЕМЕНТЫ -->
+    <div class="aura aura-1"></div>
+    <div class="aura aura-2"></div>
+    <div id="snow-layer"></div>
+
+    <!-- ЭКРАН ЗАГРУЗКИ -->
+    <div id="loading-screen">
+        <div class="loader-container">
+            <div class="loader-ring"></div>
+            <div class="loader-ring"></div>
+            <div class="loader-icon">❄️</div>
+        </div>
+        <div class="loading-text">ЗАГРУЗКА МИРА</div>
+    </div>
+
+    <!-- ОСНОВНОЕ ПРИЛОЖЕНИЕ -->
+    <div id="app-container" class="hidden">
+        
+        <!-- Боковое меню -->
+        <div id="sidebar-overlay" onclick="toggleMenu(false)"></div>
+        <div id="sidebar">
+            <div class="nav-item active" onclick="switchTab('clicker', this)">
+                <svg class="nav-icon" viewBox="0 0 24 24"><path d="M13 2L3 14H12L11 22L21 10H12L13 2Z"/></svg>
+                Кликер
+            </div>
+            <div class="nav-item" onclick="switchTab('profile', this)">
+                <svg class="nav-icon" viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
+                Профиль
+            </div>
+        </div>
+
+        <!-- Кнопка меню -->
+        <div class="top-bar">
+            <div class="menu-btn" onclick="toggleMenu(true)">
+                <div class="menu-line"></div>
+                <div class="menu-line"></div>
+                <div class="menu-line"></div>
+            </div>
+        </div>
+
+        <!-- ЭКРАН 1: КЛИКЕР -->
+        <div id="screen-clicker" class="screen active">
+            <!-- HP Бар -->
+            <div class="hp-container">
+                <div class="hp-bar-wrap">
+                    <div class="hp-fill" id="hp-bar"></div>
+                    <div class="hp-text" id="hp-text">0 / 0</div>
+                </div>
+            </div>
+            
+            <!-- Зона клика -->
+            <div class="char-area" id="char-area">
+                <!-- Картинка WebP с фолбэком -->
+                <img src="1.webp" alt="Boss" class="char-img" id="main-char" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 100 100\'><rect width=\'100\' height=\'100\' fill=\'%23112240\'/><text x=\'50\' y=\'50\' fill=\'%2364ffda\' font-size=\'10\' text-anchor=\'middle\'>WEBP</text></svg>'">
+            </div>
+        </div>
+
+        <!-- ЭКРАН 2: ПРОФИЛЬ -->
+        <div id="screen-profile" class="screen">
+            <div class="profile-card">
+                <div class="avatar-container" id="user-avatar">
+                    <!-- Дефолт иконка -->
+                    <svg viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
+                </div>
+                <div class="user-name" id="user-name">Гость</div>
+                
+                <button class="castle-btn" onclick="openAdminLogin()">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-1 11h-3v3h-3v-3H9v-3h3V8h3v3h3v3z"/></svg>
+                    Замок Администратора
+                </button>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- МОДАЛКА: ВВОД ПАРОЛЯ -->
+    <div class="modal-overlay" id="modal-password">
+        <div class="modal-content">
+            <div class="modal-title">🔒 Вход в Замок</div>
+            <div class="input-group">
+                <label>Введите секретный код:</label>
+                <input type="password" class="modal-input" id="input-password" placeholder="••••••••">
+            </div>
+            <button class="btn-primary" onclick="verifyPassword()">Разблокировать</button>
+            <button class="btn-close" onclick="closeModal('modal-password')">Отмена</button>
+        </div>
+    </div>
+
+    <!-- МОДАЛКА: АДМИН ПАНЕЛЬ -->
+    <div class="modal-overlay" id="modal-admin">
+        <div class="modal-content">
+            <div class="modal-title">⚙️ Панель Управления</div>
+            
+            <div class="input-group">
+                <label>Выберите нового босса:</label>
+                <div class="image-selector" id="admin-images">
+                    <div class="image-option selected" onclick="selectAdminImage(this, '1.webp')"><img src="1.webp" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'50\' height=\'50\'><text x=\'50%\' y=\'50%\' font-size=\'10\' text-anchor=\'middle\' fill=\'white\'>1</text></svg>'"></div>
+                    <div class="image-option" onclick="selectAdminImage(this, '2.webp')"><img src="2.webp" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'50\' height=\'50\'><text x=\'50%\' y=\'50%\' font-size=\'10\' text-anchor=\'middle\' fill=\'white\'>2</text></svg>'"></div>
+                    <div class="image-option" onclick="selectAdminImage(this, '3.webp')"><img src="3.webp" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'50\' height=\'50\'><text x=\'50%\' y=\'50%\' font-size=\'10\' text-anchor=\'middle\' fill=\'white\'>3</text></svg>'"></div>
+                    <div class="image-option" onclick="selectAdminImage(this, '4.webp')"><img src="4.webp" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'50\' height=\'50\'><text x=\'50%\' y=\'50%\' font-size=\'10\' text-anchor=\'middle\' fill=\'white\'>4</text></svg>'"></div>
+                    <div class="image-option" onclick="selectAdminImage(this, '5.webp')"><img src="5.webp" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'50\' height=\'50\'><text x=\'50%\' y=\'50%\' font-size=\'10\' text-anchor=\'middle\' fill=\'white\'>5</text></svg>'"></div>
+                </div>
+            </div>
+
+            <div class="input-group">
+                <label>Максимальное здоровье (HP):</label>
+                <input type="number" class="modal-input" id="input-hp" value="1000000">
+            </div>
+            
+            <button class="btn-primary" onclick="applyAdminSettings()">Применить изменения</button>
+            <button class="btn-close" onclick="closeModal('modal-admin')">Закрыть</button>
+        </div>
+    </div>
+
+    <!-- ОСНОВНОЙ СКРИПТ -->
+    <script>
+        // ==========================================
+        // 1. ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ И СОСТОЯНИЕ
+        // ==========================================
+        const state = {
+            maxHP: 1000000,
+            currentHP: 1000000,
+            image: '1.webp',
+            isDead: false,
+            isAdmin: false,
+            adminSelectedImage: '1.webp',
+            tgUser: null
+        };
+
+        const elements = {
+            loadingScreen: document.getElementById('loading-screen'),
+            appContainer: document.getElementById('app-container'),
+            sidebar: document.getElementById('sidebar'),
+            sidebarOverlay: document.getElementById('sidebar-overlay'),
+            hpBar: document.getElementById('hp-bar'),
+            hpText: document.getElementById('hp-text'),
+            charArea: document.getElementById('char-area'),
+            mainChar: document.getElementById('main-char'),
+            userAvatar: document.getElementById('user-avatar'),
+            userName: document.getElementById('user-name'),
+            modalPassword: document.getElementById('modal-password'),
+            modalAdmin: document.getElementById('modal-admin'),
+            inputPassword: document.getElementById('input-password'),
+            inputHP: document.getElementById('input-hp')
+        };
+
+        let isFirebaseReady = false;
+
+        // Слушаем событие загрузки Firebase из модуля
+        window.addEventListener('firebaseReady', () => {
+            isFirebaseReady = true;
+            initGame();
+        });
+
+        // ==========================================
+        // 2. ИНИЦИАЛИЗАЦИЯ ИНТЕРФЕЙСА
+        // ==========================================
+
+        // Генерация снега
+        function createSnow() {
+            const layer = document.getElementById('snow-layer');
+            const count = window.innerWidth < 768 ? 40 : 80; // Меньше снега на мобилках для FPS
+            
+            for (let i = 0; i < count; i++) {
+                const flake = document.createElement('div');
+                flake.className = 'snowflake';
+                
+                const size = Math.random() * 4 + 1; // От 1px до 5px
+                const left = Math.random() * 100;
+                const duration = Math.random() * 3 + 3; // От 3 до 6 секунд
+                const delay = Math.random() * 5;
+                
+                flake.style.width = `${size}px`;
+                flake.style.height = `${size}px`;
+                flake.style.left = `${left}vw`;
+                flake.style.animationDuration = `${duration}s`;
+                flake.style.animationDelay = `${delay}s`;
+                
+                // Разная прозрачность для глубины
+                flake.style.opacity = Math.random() * 0.5 + 0.3;
+                
+                layer.appendChild(flake);
+            }
+        }
+
+        // Инициализация Telegram WebApp
+        function initTelegram() {
+            const tg = window.Telegram?.WebApp;
+            if (!tg) {
+                console.warn("Запущено вне Telegram");
+                return;
+            }
+
+            tg.ready();
+            tg.expand();
+            
+            // Отключаем свайп вниз для закрытия (чтобы не мешало кликать)
+            tg.disableVerticalSwipes();
+            
+            // Устанавливаем цвета шапки под дизайн
+            tg.setHeaderColor('#0a192f');
+            tg.setBackgroundColor('#0a192f');
+
+            // Получаем данные пользователя
+            if (tg.initDataUnsafe?.user) {
+                state.tgUser = tg.initDataUnsafe.user;
+                elements.userName.innerText = state.tgUser.first_name + (state.tgUser.last_name ? ' ' + state.tgUser.last_name : '');
+                
+                if (state.tgUser.photo_url) {
+                    elements.userAvatar.innerHTML = `<img src="${state.tgUser.photo_url}" alt="Avatar">`;
+                }
+            }
+        }
+
+        // Управление меню
+        window.toggleMenu = function(open) {
+            if (open) {
+                elements.sidebar.classList.add('open');
+                elements.sidebarOverlay.classList.add('active');
+            } else {
+                elements.sidebar.classList.remove('open');
+                elements.sidebarOverlay.classList.remove('active');
+            }
+        }
+
+        // Переключение вкладок
+        window.switchTab = function(tabName, element) {
+            // Убираем активные классы
+            document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+            document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+            
+            // Добавляем новые
+            document.getElementById(`screen-${tabName}`).classList.add('active');
+            element.classList.add('active');
+            
+            toggleMenu(false);
+        }
+
+        // ==========================================
+        // 3. ЛОГИКА БАЗЫ ДАННЫХ (FIREBASE)
+        // ==========================================
+        
+        function initGame() {
+            const { db, ref, onValue, set, isFirebaseActive } = window.gameDB;
+
+            if (isFirebaseActive) {
+                console.log("Подключение к глобальной базе...");
+                
+                // Слушаем изменения в реальном времени
+                onValue(ref(db, 'global_game/'), (snapshot) => {
+                    const data = snapshot.val();
+                    
+                    if (data) {
+                        // Обновляем состояние
+                        state.maxHP = data.maxHP || 1000000;
+                        state.currentHP = data.currentHP !== undefined ? data.currentHP : state.maxHP;
+                        
+                        // Обновляем картинку только если она изменилась
+                        if (data.image && data.image !== state.image) {
+                            state.image = data.image;
+                            elements.mainChar.src = state.image;
+                        }
+                        
+                        // Синхронизируем админку (если открыта)
+                        elements.inputHP.value = state.maxHP;
+                        
+                        updateUI();
+                    } else {
+                        // Если базы нет, создаем начальные данные
+                        console.log("Создание начальных данных в базе...");
+                        set(ref(db, 'global_game/'), {
+                            maxHP: 1000000,
+                            currentHP: 1000000,
+                            image: '1.webp'
+                        });
+                    }
+                });
+            } else {
+                console.log("Локальный режим (LocalStorage)");
+                loadLocalData();
+            }
+        }
+
+        // Загрузка локальных данных
+        function loadLocalData() {
+            const saved = localStorage.getItem('winter_clicker_data');
+            if (saved) {
+                try {
+                    const data = JSON.parse(saved);
+                    state.maxHP = data.maxHP || 1000000;
+                    state.currentHP = data.currentHP !== undefined ? data.currentHP : state.maxHP;
+                    state.image = data.image || '1.webp';
+                    
+                    elements.mainChar.src = state.image;
+                    elements.inputHP.value = state.maxHP;
+                    updateUI();
+                } catch(e) {
+                    console.error("Ошибка чтения LocalStorage", e);
+                }
+            } else {
+                updateUI();
+            }
+        }
+
+        // Сохранение локальных данных
+        function saveLocalData() {
+            localStorage.setItem('winter_clicker_data', JSON.stringify({
+                maxHP: state.maxHP,
+                currentHP: state.currentHP,
+                image: state.image
+            }));
+        }
+
+        // ==========================================
+        // 4. ОБНОВЛЕНИЕ ИНТЕРФЕЙСА (UI)
+        // ==========================================
+
+        function updateUI() {
+            // Форматирование чисел (1000000 -> 1 000 000)
+            const formatNum = (num) => Math.floor(num).toLocaleString('ru-RU');
+            
+            // Обновление текста
+            elements.hpText.innerText = `${formatNum(state.currentHP)} / ${formatNum(state.maxHP)}`;
+            
+            // Обновление полоски
+            const percent = Math.max(0, (state.currentHP / state.maxHP) * 100);
+            elements.hpBar.style.width = `${percent}%`;
+            
+            // Проверка на смерть
+            if (state.currentHP <= 0) {
+                state.isDead = true;
+                elements.charArea.classList.add('dead');
+            } else {
+                state.isDead = false;
+                elements.charArea.classList.remove('dead');
+            }
+        }
+
+        // ==========================================
+        // 5. ЛОГИКА КЛИКА
+        // ==========================================
+
+        elements.charArea.addEventListener('pointerdown', (e) => {
+            e.preventDefault(); // Предотвращаем двойной клик/зум
+            
+            if (state.isDead) {
+                showDeadMessage(e.clientX, e.clientY);
+                return;
+            }
+
+            // 1. Рассчитываем урон
+            let damage = 1;
+            let roll = Math.random() * 100;
+            let isCrit = false;
+
+            if (roll < 80) {
+                damage = 1;
+            } else if (roll < 95) {
+                damage = 5;
+            } else if (roll < 99.99) {
+                damage = 50;
+            } else {
+                damage = 1000;
+                isCrit = true;
+            }
+
+            // Не наносим урона больше, чем осталось HP
+            if (state.currentHP - damage < 0) {
+                damage = state.currentHP;
+            }
+
+            // 2. Применяем урон
+            state.currentHP -= damage;
+            
+            // 3. Визуальные эффекты
+            showDamageNumber(e.clientX, e.clientY, damage, isCrit);
+            if (isCrit) {
+                document.body.classList.add('shake-effect');
+                setTimeout(() => document.body.classList.remove('shake-effect'), 400);
+            }
+            updateUI();
+
+            // 4. Сохраняем в базу
+            pushDamageToDB(damage);
+        });
+
+        function pushDamageToDB(damage) {
+            const { db, ref, runTransaction, isFirebaseActive } = window.gameDB;
+            
+            if (isFirebaseActive) {
+                // Атомарная транзакция (защита от одновременных кликов)
+                runTransaction(ref(db, 'global_game/currentHP'), (currentHP) => {
+                    if (currentHP === null) return state.maxHP - damage; // Если пусто
+                    return Math.max(0, currentHP - damage);
+                }).catch(err => console.error("Ошибка транзакции:", err));
+            } else {
+                // Локально
+                saveLocalData();
+            }
+        }
+
+        function showDamageNumber(x, y, damage, isCrit) {
+            const el = document.createElement('div');
+            el.className = `dmg-text ${isCrit ? 'crit' : ''}`;
+            el.innerText = `-${damage}`;
+            
+            // Случайное смещение для красоты
+            const offsetX = (Math.random() - 0.5) * 40;
+            const offsetY = (Math.random() - 0.5) * 20;
+            
+            el.style.left = `${x + offsetX}px`;
+            el.style.top = `${y + offsetY}px`;
+            
+            document.body.appendChild(el);
+            
+            // Удаляем через 1 секунду (после анимации)
+            setTimeout(() => el.remove(), 1000);
+        }
+
+        function showDeadMessage(x, y) {
+            // Проверяем, нет ли уже сообщения
+            if (document.querySelector('.dead-alert')) return;
+
+            const el = document.createElement('div');
+            el.className = 'dead-alert';
+            el.innerText = 'УЖЕ МЕРТВ!';
+            
+            document.body.appendChild(el);
+            setTimeout(() => el.remove(), 1500);
+        }
+
+        // ==========================================
+        // 6. ЛОГИКА АДМИНКИ
+        // ==========================================
+
+        window.openAdminLogin = function() {
+            elements.inputPassword.value = '';
+            elements.modalPassword.classList.add('active');
+            
+            // Фокус на инпут через небольшую задержку (для мобилок)
+            setTimeout(() => elements.inputPassword.focus(), 300);
+        }
+
+        window.verifyPassword = function() {
+            const pass = elements.inputPassword.value.trim();
+            const correctPass = "Самир2014"; // Пароль
+            
+            if (pass === correctPass) {
+                state.isAdmin = true;
+                closeModal('modal-password');
+                
+                // Открываем админку
+                elements.inputHP.value = state.maxHP;
+                elements.modalAdmin.classList.add('active');
+                
+                // Сбрасываем выделение на текущую картинку
+                document.querySelectorAll('.image-option').forEach(opt => opt.classList.remove('selected'));
+                const currentImgIndex = state.image.replace('.webp', '');
+                const options = document.querySelectorAll('.image-option');
+                if(options[parseInt(currentImgIndex) - 1]) {
+                    options[parseInt(currentImgIndex) - 1].classList.add('selected');
+                }
+                state.adminSelectedImage = state.image;
+                
+            } else {
+                // Тряска инпута при ошибке
+                elements.inputPassword.style.borderColor = 'var(--danger-red)';
+                elements.inputPassword.style.animation = 'shake 0.4s';
+                setTimeout(() => {
+                    elements.inputPassword.style.borderColor = '';
+                    elements.inputPassword.style.animation = '';
+                }, 400);
+            }
+        }
+
+        window.closeModal = function(modalId) {
+            document.getElementById(modalId).classList.remove('active');
+        }
+
+        window.selectAdminImage = function(element, imgName) {
+            document.querySelectorAll('.image-option').forEach(opt => opt.classList.remove('selected'));
+            element.classList.add('selected');
+            state.adminSelectedImage = imgName;
+        }
+
+        window.applyAdminSettings = function() {
+            const newHP = parseInt(elements.inputHP.value);
+            
+            if (isNaN(newHP) || newHP <= 0) {
+                elements.inputHP.style.borderColor = 'var(--danger-red)';
+                setTimeout(() => elements.inputHP.style.borderColor = '', 1000);
+                return;
+            }
+
+            const { db, ref, set, isFirebaseActive } = window.gameDB;
+
+            // Обновляем состояние
+            state.maxHP = newHP;
+            state.currentHP = newHP;
+            state.image = state.adminSelectedImage;
+            elements.mainChar.src = state.image;
+            updateUI();
+
+            if (isFirebaseActive) {
+                // Обновляем глобально
+                set(ref(db, 'global_game/'), {
+                    maxHP: newHP,
+                    currentHP: newHP,
+                    image: state.adminSelectedImage
+                }).then(() => {
+                    closeModal('modal-admin');
+                    if(window.Telegram?.WebApp) window.Telegram.WebApp.showAlert("Глобальные настройки применены!");
+                });
+            } else {
+                // Локально
+                saveLocalData();
+                closeModal('modal-admin');
+                if(window.Telegram?.WebApp) window.Telegram.WebApp.showAlert("Настройки применены (Локально)");
+            }
+        }
+
+        // ==========================================
+        // 7. ЗАПУСК
+        // ==========================================
+        
+        // Ждем загрузки DOM и запускаем
+        document.addEventListener('DOMContentLoaded', () => {
+            createSnow();
+            initTelegram();
+            
+            // Имитация загрузки ресурсов (2 секунды)
+            setTimeout(() => {
+                elements.loadingScreen.classList.add('hidden');
+                elements.appContainer.classList.remove('hidden');
+                
+                // Если Firebase не загрузился за 2 сек, включаем локальный режим
+                if (!isFirebaseReady) {
+                    console.warn("Firebase не ответил, запуск локально.");
+                    loadLocalData();
+                }
+            }, 2000);
+        });
+
+        // Предотвращение случайного зума при двойном тапе (iOS)
+        document.addEventListener('dblclick', (e) => {
+            e.preventDefault();
+        }, { passive: false });
+
+        // Блокировка контекстного меню (долгий тап)
+        document.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+        });
+    </script>
+</body>
+</html>
